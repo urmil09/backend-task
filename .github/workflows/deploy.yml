@@ -1,6 +1,6 @@
 name: GitHub Actions
 run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
-on: [push]
+on: [ push ]
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -8,20 +8,80 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.22'
 
-      - name: Add known hosts
+      - name: Install Goose CLI
         run: |
-          ssh-keyscan -H 13.48.99.179 >> ~/.ssh/known_hosts
+          go install github.com/pressly/goose/v3/cmd/goose@latest
+
+      - name: Install Dependencies
+        run: |
+          go mod tidy
+          go mod download
+
+      - name: Run Goose Migrations
+        run: |
+          export GOOSE_DRIVER=postgres
+          export GOOSE_DBSTRING="postgres://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:5432/flink?sslmode=disable"
+          export GOOSE_MIGRATION_DIR=./migrations
+          goose up
+
+      - name: Build Go App
+        run: |
+          go build -o backend-task ./cmd/api
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Log in to Amazon ECR
+        run: |
+          docker login -u AWS -p $(aws ecr get-login-password --region eu-north-1) ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com
+
+      - name: Build Backend Docker Image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/flink/backend-task:latest .
+
+
+      - name: Push Docker Image to ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/flink/backend-task:latest
+
+
 
       - name: Deploy to EC2
-        run: |
-          scp -r ./* ec2-user@13.48.99.179>:/app/my-app
-          ssh ec2-user@13.48.99.179> << 'EOF'
-          cd /app/my-app
-          # Run deployment commands (e.g., npm install, systemctl restart service)
-          EOF
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            
+            ls -a
+
+            # Log in to ECR
+            sudo aws ecr get-login-password --region eu-north-1 | sudo docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com
+            
+            # Pull the Docker image from Amazon ECR
+            sudo docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/flink/backend-task:latest
+
+            
+            
+            # Stop any existing backend container running on port 8080
+            container_id=$(sudo docker ps -q -f "publish=8080")
+            if [ ! -z "$container_id" ]; then
+              # Stop the container
+              sudo docker stop $container_id
+              # Remove the container
+              sudo docker rm $container_id
+            fi
+
+        
+            sudo docker run --network my-network -d -p 8080:8080 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/flink/backend-task:latest

@@ -1,23 +1,20 @@
 package main
 
 import (
-	"context"
-	"fmt"
+	"github.com/flink/flink-backend-assingment/internal/data"
+	"github.com/flink/flink-backend-assingment/internal/health"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"log/slog"
 	"net/http"
 )
 
-func setupRoutes(router *mux.Router, conn *pgxpool.Pool) {
-	// health endpoint
-	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		_, err := conn.Exec(context.Background(), "select 1")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+func setupRoutes(router *mux.Router, conn *pgxpool.Pool, logger *slog.Logger) {
+	healthHandler := health.NewHandler()
+	var healthRepository data.HealthRepository
+	healthRepository = data.HealthModel{DB: conn}
 
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(fmt.Sprintf("ok reponse!")))
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		healthHandler.CheckHealth(healthRepository, logger, w, r)
 	}).Methods(http.MethodGet)
 }

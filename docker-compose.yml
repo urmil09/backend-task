@@ -1,0 +1,51 @@
+# specifing the version of the compose file specification is deprecated https://docs.docker.com/compose/compose-file/#compose-file
+#
+# if your docker engine is incompatible uncomment the below version specificaion
+# https://docs.docker.com/compose/compose-file/compose-versioning/#compatibility-matrix
+# version: 3.8
+
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - migrator
+    env_file: .env
+    environment:
+      - DB_HOST=database
+
+
+  database:
+    image: postgres:16
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=flink"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    env_file: .env
+    environment:
+      - POSTGRES_USER=flink
+      - POSTGRES_PASSWORD=flink.8080
+      - POSTGRES_DB=flink
+  
+  migrator:
+    build: 
+      context: .
+      dockerfile: ./Dockerfile.migrator
+    depends_on:
+      - database
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/migrations/
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_MIGRATION_DIR: ./migrations
+      GOOSE_DBSTRING: "postgres://flink:flink.8080@database:5432/flink?sslmode=disable"
+
+volumes:
+  pgdata:

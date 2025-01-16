@@ -24,7 +24,7 @@ type Config struct {
 
 // Database contains configurations relevant to our database connection.
 type Database struct {
-	Host     string `env:"DB_HOST" envDefault:"localhost"`
+	Host     string `env:"DB_HOST" envDefault:"postgres-db"`
 	Port     int    `env:"DB_PORT" envDefault:"5432"`
 	User     string `env:"DB_USER" envDefault:"flink"`
 	Password string `env:"DB_PASSWORD" envDefault:"flink.8080"`
